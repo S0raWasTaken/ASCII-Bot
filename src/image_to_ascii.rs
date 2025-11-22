@@ -15,7 +15,11 @@ pub struct AsciiRenderer {
 }
 
 impl AsciiRenderer {
-    pub fn new(brightness_boost: f32, background_color: Rgba<u8>, max_width: u32) -> Res<Self> {
+    pub fn new(
+        brightness_boost: f32,
+        background_color: Rgba<u8>,
+        max_width: u32,
+    ) -> Res<Self> {
         let font_data = include_bytes!("../fonts/RobotoMono-Regular.ttf");
         let font = FontRef::try_from_slice(font_data)?;
 
@@ -37,12 +41,17 @@ impl AsciiRenderer {
     }
 
     /// Convert image bytes to ASCII art with proper aspect ratio
-    pub fn process_image(&self, image_bytes: &[u8], charset: &str) -> Res<String> {
+    pub fn process_image(
+        &self,
+        image_bytes: &[u8],
+        charset: &str,
+    ) -> Res<String> {
         // Load the image to get dimensions
         let img = image::load_from_memory(image_bytes)?;
         let (img_width, img_height) = img.dimensions();
 
-        let (target_width, target_height) = self.calculate_ascii_dimensions(img_width, img_height);
+        let (target_width, target_height) =
+            self.calculate_ascii_dimensions(img_width, img_height);
 
         // Convert to ASCII using libasciic
         let cursor = Cursor::new(image_bytes);
@@ -60,7 +69,11 @@ impl AsciiRenderer {
 
     /// Calculate ASCII dimensions maintaining aspect ratio
     /// Width is clamped to max_width_chars (120)
-    fn calculate_ascii_dimensions(&self, img_width: u32, img_height: u32) -> (u32, u32) {
+    fn calculate_ascii_dimensions(
+        &self,
+        img_width: u32,
+        img_height: u32,
+    ) -> (u32, u32) {
         let aspect_ratio = img_width as f32 / img_height as f32;
 
         // Characters are roughly 2x taller than wide in most monospace fonts
@@ -70,7 +83,9 @@ impl AsciiRenderer {
         let target_width = self.max_width_chars;
 
         // Calculate height: height = width / (aspect_ratio * correction)
-        let target_height = (target_width as f32 / (aspect_ratio * char_aspect_correction)) as u32;
+        let target_height = (target_width as f32
+            / (aspect_ratio * char_aspect_correction))
+            as u32;
 
         // Ensure at least 1 row
         (target_width, target_height.max(1))
@@ -91,7 +106,11 @@ impl AsciiRenderer {
         let img_width = width * self.char_width;
         let img_height = height * self.char_height;
 
-        let mut image = ImageBuffer::from_pixel(img_width, img_height, self.background_color);
+        let mut image = ImageBuffer::from_pixel(
+            img_width,
+            img_height,
+            self.background_color,
+        );
 
         let scale = PxScale::from(self.char_height as f32);
 
@@ -231,10 +250,12 @@ pub async fn image_to_ascii(
     brightness_boost: Option<u32>,
     #[description = "The image's background colour, accepts hex RGBA, default = #141414"]
     background_color: Option<String>,
-    #[description = "Sets the maximum size of the image (Accepts up to 500)"] max_size: Option<u32>,
+    #[description = "Sets the maximum size of the image (Accepts up to 500)"]
+    max_size: Option<u32>,
 ) -> Result<(), Error> {
     let brightness_boost = brightness_boost.unwrap_or(100);
-    let background_color = parse_hex_color(background_color.as_deref().unwrap_or("#141414"))?;
+    let background_color =
+        parse_hex_color(background_color.as_deref().unwrap_or("#141414"))?;
     let size = max_size.unwrap_or(150);
     _image_to_ascii(
         ctx,
@@ -253,10 +274,8 @@ pub async fn image_to_ascii(
     interaction_context = "Guild|BotDm|PrivateChannel"
 )]
 pub async fn attachment_to_ascii(ctx: Context<'_>, msg: Message) -> Res<()> {
-    let attachment = msg
-        .attachments
-        .first()
-        .ok_or("No attachment in this message")?;
+    let attachment =
+        msg.attachments.first().ok_or("No attachment in this message")?;
 
     _image_to_ascii(
         ctx,
@@ -298,7 +317,8 @@ async fn _image_to_ascii(
 
     let charset = charset.unwrap_or(".+P0#@");
 
-    let renderer: AsciiRenderer = AsciiRenderer::new(brightness_boost, background_color, size)?;
+    let renderer: AsciiRenderer =
+        AsciiRenderer::new(brightness_boost, background_color, size)?;
 
     let ascii_art = renderer.process_image(image_bytes, charset)?;
 
@@ -312,7 +332,6 @@ async fn _image_to_ascii(
 
     let files = CreateAttachment::bytes(png_bytes, "ascii.png");
 
-    ctx.send(poise::CreateReply::default().attachment(files))
-        .await?;
+    ctx.send(poise::CreateReply::default().attachment(files)).await?;
     Ok(())
 }

@@ -4,7 +4,9 @@ use poise::{
     serenity_prelude::{ClientBuilder, CreateEmbed, GatewayIntents},
 };
 
-use crate::image_to_ascii::{attachment_to_ascii, avatar_to_ascii, image_to_ascii};
+use crate::image_to_ascii::{
+    attachment_to_ascii, avatar_to_ascii, image_to_ascii,
+};
 
 struct Data;
 type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -28,9 +30,8 @@ async fn main() -> Res<()> {
             .collect::<Vec<_>>(),
     )?;
 
-    let mut client = ClientBuilder::new(token, intents)
-        .framework(framework())
-        .await?;
+    let mut client =
+        ClientBuilder::new(token, intents).framework(framework()).await?;
 
     client.start().await?;
     Ok(())
@@ -42,7 +43,10 @@ async fn on_error(error: FrameworkError<'_, Data, Error>) {
             ctx.send(CreateReply {
                 embeds: vec![
                     CreateEmbed::new()
-                        .title(format!("Error in command `/{}`", ctx.command().name))
+                        .title(format!(
+                            "Error in command `/{}`",
+                            ctx.command().name
+                        ))
                         .description(format!(
                             "```diff\n- {}```",
                             error.to_string().replace('\n', "\n- ").trim()
@@ -66,7 +70,11 @@ async fn on_error(error: FrameworkError<'_, Data, Error>) {
 
 fn framework() -> Framework<Data, Error> {
     let options = FrameworkOptions {
-        commands: vec![image_to_ascii(), attachment_to_ascii(), avatar_to_ascii()],
+        commands: vec![
+            image_to_ascii(),
+            attachment_to_ascii(),
+            avatar_to_ascii(),
+        ],
         on_error: |e| Box::pin(on_error(e)),
         ..Default::default()
     };
