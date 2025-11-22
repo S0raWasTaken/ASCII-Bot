@@ -37,7 +37,18 @@ cargo build --release
 # output: ./target/release/ascii-bot or ascii-bot.exe
 ```
 
-### License
+<div align="center">
+
+# Please, do not share your compiled binary
+
+</div>
+
+The token is included ***with*** the binary, just XOR'ed in order to not show up obviously in the binary `strings`.<br>
+However, this is no encryption whatsoever.
+
+This project assumes that you're not stupid. Any attacker that knows where your binary comes from will instantly know how to grab your bot token from your binary file.
+
+## License
 [MIT](LICENSE) and [OPEN FONT LICENSE](fonts/OFL.txt)
 
 **TL;DR (not legal advice):**
