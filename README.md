@@ -3,8 +3,8 @@
 # ASCII Bot
 
   <img src="./koakuma_txt.png" alt="Original art by garasuno_1182" width="200"/>
-
-> **Turns any image into ASCII in a couple of clicks.**
+  
+**Turns any image into ASCII in a couple of clicks.**
 </div>
 
 ### Commands:
