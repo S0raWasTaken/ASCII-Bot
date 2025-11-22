@@ -1,0 +1,13 @@
+[package]
+name = "ascii-bot"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ab_glyph = "0.2.32"
+image = "0.25.9"
+imageproc = "0.25.0"
+libasciic = "1.0.1"
+poise = { git = "https://github.com/serenity-rs/poise", branch = "current"}
+reqwest = "0.12.24"
+tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros"] }
