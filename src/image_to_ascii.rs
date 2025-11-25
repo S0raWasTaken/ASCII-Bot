@@ -3,7 +3,7 @@ use image::{GenericImageView, ImageBuffer, Rgba, RgbaImage};
 use imageproc::drawing::draw_text_mut;
 use std::io::Cursor;
 
-use crate::{Context, Error, Res, parse_hex_color::parse_hex_color};
+use crate::Res;
 
 pub struct AsciiRenderer {
     font: FontRef<'static>,
@@ -230,108 +230,65 @@ impl AsciiRenderer {
     }
 }
 
-use poise::{
-    command,
-    serenity_prelude::{Attachment, CreateAttachment, Message, User},
-};
+/// Parse a hex color string to Rgba<u8>
+/// Accepts formats: "#RRGGBB", "RRGGBB", "#RGB", "RGB", "0xRRGGBB"
+/// With optional alpha: "#RRGGBBAA", "RRGGBBAA", "#RGBA", "RGBA"
+/// If no alpha is provided, defaults to 255 (fully opaque)
+pub fn parse_hex_color(hex: &str) -> Result<Rgba<u8>, String> {
+    // Lowercase and remove '#' or '0x' if present
+    let hex = hex.to_lowercase();
+    let hex = hex
+        .strip_prefix('#')
+        .or_else(|| hex.strip_prefix("0x"))
+        .unwrap_or(&hex);
 
-const DEFAULT_BACKGROUND: Rgba<u8> = Rgba([20, 20, 20, 255]);
+    match hex.len() {
+        // Short format: "RGB" -> "RRGGBB"
+        3 => {
+            let r = parse_hex_single(hex, 0)?;
+            let g = parse_hex_single(hex, 1)?;
+            let b = parse_hex_single(hex, 2)?;
 
-#[command(
-    slash_command,
-    install_context = "Guild|User",
-    interaction_context = "Guild|BotDm|PrivateChannel"
-)]
-pub async fn image_to_ascii(
-    ctx: Context<'_>,
-    #[description = "Image to convert to ASCII"] attachment: Attachment,
-    #[description = "Custom charset"] charset: Option<String>,
-    #[description = "A Brightness boost value. 50 = 50% boost, 100 = 100% boost and so on"]
-    brightness_boost: Option<u32>,
-    #[description = "The image's background colour, accepts hex RGBA, default = #141414"]
-    background_color: Option<String>,
-    #[description = "Sets the maximum size of the image (Accepts up to 500)"]
-    max_size: Option<u32>,
-) -> Result<(), Error> {
-    let brightness_boost = brightness_boost.unwrap_or(100);
-    let background_color =
-        parse_hex_color(background_color.as_deref().unwrap_or("#141414"))?;
-    let size = max_size.unwrap_or(150);
-    _image_to_ascii(
-        ctx,
-        &attachment.download().await?,
-        charset.as_deref(),
-        (100 + brightness_boost) as f32 / 100.0,
-        background_color,
-        size,
-    )
-    .await
+            Ok(Rgba([r, g, b, 255]))
+        }
+        // Short format with alpha: "RGBA" -> "RRGGBBAA"
+        4 => {
+            let r = parse_hex_single(hex, 0)?;
+            let g = parse_hex_single(hex, 1)?;
+            let b = parse_hex_single(hex, 2)?;
+            let a = parse_hex_single(hex, 3)?;
+
+            // Double each digit: F -> FF
+            Ok(Rgba([r, g, b, a]))
+        }
+        // Full format: "RRGGBB"
+        6 => {
+            let r = parse_hex_pair(hex, 0)?;
+            let g = parse_hex_pair(hex, 2)?;
+            let b = parse_hex_pair(hex, 4)?;
+
+            Ok(Rgba([r, g, b, 255]))
+        }
+        // Full format with alpha: "RRGGBBAA"
+        8 => {
+            let r = parse_hex_pair(hex, 0)?;
+            let g = parse_hex_pair(hex, 2)?;
+            let b = parse_hex_pair(hex, 4)?;
+            let a = parse_hex_pair(hex, 6)?;
+
+            Ok(Rgba([r, g, b, a]))
+        }
+        _ => Err(format!("Invalid hex color length: {}", hex)),
+    }
 }
 
-#[command(
-    context_menu_command = "Attachment to ASCII",
-    install_context = "Guild|User",
-    interaction_context = "Guild|BotDm|PrivateChannel"
-)]
-pub async fn attachment_to_ascii(ctx: Context<'_>, msg: Message) -> Res<()> {
-    let attachment =
-        msg.attachments.first().ok_or("No attachment in this message")?;
-
-    _image_to_ascii(
-        ctx,
-        &attachment.download().await?,
-        None,
-        1.0,
-        DEFAULT_BACKGROUND,
-        150,
-    )
-    .await
+fn parse_hex_pair(hex: &str, start: usize) -> Result<u8, String> {
+    u8::from_str_radix(&hex[start..start + 2], 16)
+        .map_err(|_| format!("Invalid hex color: {}", hex))
 }
 
-#[command(
-    context_menu_command = "User Avatar to ASCII",
-    install_context = "Guild|User",
-    interaction_context = "Guild|BotDm|PrivateChannel"
-)]
-pub async fn avatar_to_ascii(ctx: Context<'_>, user: User) -> Res<()> {
-    _image_to_ascii(
-        ctx,
-        &reqwest::get(user.static_face()).await?.bytes().await?,
-        None,
-        1.0,
-        DEFAULT_BACKGROUND,
-        150,
-    )
-    .await
-}
-
-async fn _image_to_ascii(
-    ctx: Context<'_>,
-    image_bytes: &[u8],
-    charset: Option<&str>,
-    brightness_boost: f32,
-    background_color: Rgba<u8>,
-    size: u32,
-) -> Res<()> {
-    ctx.defer().await?;
-
-    let charset = charset.unwrap_or(".+P0#@");
-
-    let renderer: AsciiRenderer =
-        AsciiRenderer::new(brightness_boost, background_color, size)?;
-
-    let ascii_art = renderer.process_image(image_bytes, charset)?;
-
-    let output_image: RgbaImage = renderer.render_to_image(&ascii_art)?;
-
-    let mut png_bytes = Vec::new();
-    output_image.write_to(
-        &mut std::io::Cursor::new(&mut png_bytes),
-        image::ImageFormat::Png,
-    )?;
-
-    let files = CreateAttachment::bytes(png_bytes, "ascii.png");
-
-    ctx.send(poise::CreateReply::default().attachment(files)).await?;
-    Ok(())
+fn parse_hex_single(hex: &str, start: usize) -> Result<u8, String> {
+    u8::from_str_radix(&hex[start..start + 1], 16)
+        .map(|v| v * 17) // Expand: F -> FF
+        .map_err(|_| format!("Invalid hex color: {}", hex))
 }
