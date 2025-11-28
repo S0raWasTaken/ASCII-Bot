@@ -1355,9 +1355,9 @@ checksum = "7a79a3332a6609480d7d0c9eab957bca6b455b91bb84e66d19f5ff66294b85b8"
 
 [[package]]
 name = "libasciic"
-version = "1.0.1"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e8c6bdde0229150a7ea3fc8785c30d61f06c4ffe6c40e2f5e6bfce7ba0bdc05"
+checksum = "2fcd400ab4a9e11e9d869f695e7c8944b03ba1fce0aa662107a51e853b648e59"
 dependencies = [
  "image",
 ]
