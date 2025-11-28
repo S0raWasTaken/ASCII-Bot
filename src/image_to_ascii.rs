@@ -61,7 +61,7 @@ impl AsciiRenderer {
     }
 
     /// Calculate ASCII dimensions maintaining aspect ratio
-    /// Width is clamped to max_width_chars (120)
+    /// Width is clamped to max_width_chars (200)
     fn calculate_ascii_dimensions(
         &self,
         img_width: u32,

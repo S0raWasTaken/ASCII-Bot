@@ -61,6 +61,7 @@ pub async fn attachment_to_ascii(ctx: Context<'_>, msg: Message) -> Res<()> {
 pub async fn avatar_to_ascii(ctx: Context<'_>, user: User) -> Res<()> {
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
+        .read_timeout(Duration::from_secs(30))
         .build()?;
     let avatar = client
         .get(user.static_face())
