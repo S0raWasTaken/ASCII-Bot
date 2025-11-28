@@ -1,6 +1,7 @@
 use ab_glyph::{FontRef, PxScale};
 use image::{GenericImageView, ImageBuffer, Rgba, RgbaImage};
-use imageproc::drawing::draw_text_mut;
+use imageproc::drawing::{draw_filled_rect_mut, draw_text_mut};
+use imageproc::rect::Rect;
 use std::io::Cursor;
 
 use crate::Res;
@@ -11,33 +12,24 @@ pub struct AsciiRenderer {
     char_height: u32,
     background_color: Rgba<u8>,
     max_width_chars: u32,
-    brightness_boost: f32,
+    background_brightness: f32,
 }
 
 impl AsciiRenderer {
-    pub fn new(
-        brightness_boost: f32,
-        background_color: Rgba<u8>,
-        max_width: u32,
-    ) -> Res<Self> {
+    pub fn new(background_brightness: f32, max_width: u32) -> Res<Self> {
         let font_data = include_bytes!("../fonts/RobotoMono-Regular.ttf");
         let font = FontRef::try_from_slice(font_data)?;
+        let background_color = Rgba([0, 0, 0, 255]);
+        let background_brightness = background_brightness.clamp(0.0, 1.0);
 
         Ok(Self {
             font,
             char_width: 9,
             char_height: 18,
             background_color,
-            max_width_chars: max_width.min(500),
-            brightness_boost,
+            max_width_chars: max_width.min(200),
+            background_brightness,
         })
-    }
-
-    fn boost_brightness(&self, color: Rgba<u8>) -> Rgba<u8> {
-        let r = (color[0] as f32 * self.brightness_boost).min(255.0) as u8;
-        let g = (color[1] as f32 * self.brightness_boost).min(255.0) as u8;
-        let b = (color[2] as f32 * self.brightness_boost).min(255.0) as u8;
-        Rgba([r, g, b, color[3]])
     }
 
     /// Convert image bytes to ASCII art with proper aspect ratio
@@ -55,20 +47,21 @@ impl AsciiRenderer {
 
         // Convert to ASCII using libasciic
         let cursor = Cursor::new(image_bytes);
-        let ascii_art = libasciic::AsciiBuilder::new(cursor)?
+        let ascii_art = libasciic::AsciiBuilder::new(cursor)
             .dimensions(target_width, target_height)
             .colorize(true)
-            .style(libasciic::Style::FgPaint)
+            .style(libasciic::Style::Mixed)
             .threshold(0)
             .filter_type(libasciic::FilterType::Lanczos3)
-            .charset(charset)?
+            .charset(charset)
+            .background_brightness(self.background_brightness)
             .make_ascii()?;
 
         Ok(ascii_art)
     }
 
     /// Calculate ASCII dimensions maintaining aspect ratio
-    /// Width is clamped to max_width_chars (120)
+    /// Width is clamped to max_width_chars (200)
     fn calculate_ascii_dimensions(
         &self,
         img_width: u32,
@@ -92,6 +85,7 @@ impl AsciiRenderer {
     }
 
     /// Render ASCII art with ANSI RGB color codes back to an image
+    /// Now supports both foreground and background colors
     pub fn render_to_image(&self, ascii_text: &str) -> Res<RgbaImage> {
         let lines: Vec<&str> = ascii_text.lines().collect();
         let height = lines.len() as u32;
@@ -117,17 +111,27 @@ impl AsciiRenderer {
         for (line_idx, line) in lines.iter().enumerate() {
             let parsed = self.parse_colored_line(line);
 
-            for (col_idx, (ch, color)) in parsed.iter().enumerate() {
-                let x = col_idx as i32 * self.char_width as i32;
-                let y = line_idx as i32 * self.char_height as i32;
+            for (col_idx, (ch, fg_color, bg_color)) in parsed.iter().enumerate()
+            {
+                let x = col_idx as u32 * self.char_width;
+                let y = line_idx as u32 * self.char_height;
 
-                let boosted_colour = self.boost_brightness(*color);
+                // Draw background rectangle first if background color is set
+                if let Some(bg) = bg_color {
+                    draw_filled_rect_mut(
+                        &mut image,
+                        Rect::at(x as i32, y as i32)
+                            .of_size(self.char_width, self.char_height),
+                        *bg,
+                    );
+                }
 
+                // Draw character with foreground color
                 draw_text_mut(
                     &mut image,
-                    boosted_colour,
-                    x,
-                    y,
+                    *fg_color,
+                    x as i32,
+                    y as i32,
                     scale,
                     &self.font,
                     &ch.to_string(),
@@ -165,10 +169,14 @@ impl AsciiRenderer {
 
     /// Parse a line with RGB ANSI escape codes
     /// Format: \x1b[38;2;R;G;Bm (foreground) or \x1b[48;2;R;G;Bm (background)
-    /// Color persists until next code or reset (\x1b[0m)
-    fn parse_colored_line(&self, line: &str) -> Vec<(char, Rgba<u8>)> {
+    /// Returns: Vec<(char, foreground_color, optional_background_color)>
+    fn parse_colored_line(
+        &self,
+        line: &str,
+    ) -> Vec<(char, Rgba<u8>, Option<Rgba<u8>>)> {
         let mut result = Vec::new();
-        let mut current_color = Rgba([255, 255, 255, 255]); // Default white
+        let mut current_fg = Rgba([255, 255, 255, 255]); // Default white
+        let mut current_bg: Option<Rgba<u8>> = None; // Default no background
         let mut chars = line.chars();
 
         while let Some(ch) = chars.next() {
@@ -187,13 +195,23 @@ impl AsciiRenderer {
                     }
 
                     // Parse RGB code or reset
-                    if let Some(color) = self.parse_ansi_rgb(&code) {
-                        current_color = color;
+                    match self.parse_ansi_rgb(&code) {
+                        Some(AnsiColor::Foreground(color)) => {
+                            current_fg = color;
+                        }
+                        Some(AnsiColor::Background(color)) => {
+                            current_bg = Some(color);
+                        }
+                        Some(AnsiColor::Reset) => {
+                            current_fg = Rgba([255, 255, 255, 255]);
+                            current_bg = None;
+                        }
+                        None => {}
                     }
                 }
             } else {
-                // Regular character - use current color
-                result.push((ch, current_color));
+                // Regular character - use current colors
+                result.push((ch, current_fg, current_bg));
             }
         }
 
@@ -202,7 +220,7 @@ impl AsciiRenderer {
 
     /// Parse ANSI RGB color codes
     /// Formats: 38;2;R;G;B (foreground) or 48;2;R;G;B (background) or 0 (reset)
-    fn parse_ansi_rgb(&self, code: &str) -> Option<Rgba<u8>> {
+    fn parse_ansi_rgb(&self, code: &str) -> Option<AnsiColor> {
         let parts: Vec<&str> = code.split(';').collect();
 
         // RGB foreground: 38;2;R;G;B
@@ -210,85 +228,29 @@ impl AsciiRenderer {
             let r = parts[2].parse().ok()?;
             let g = parts[3].parse().ok()?;
             let b = parts[4].parse().ok()?;
-            return Some(Rgba([r, g, b, 255]));
+            return Some(AnsiColor::Foreground(Rgba([r, g, b, 255])));
         }
 
-        // RGB background: 48;2;R;G;B (for BgPaint or BgOnly styles)
+        // RGB background: 48;2;R;G;B
         if parts.len() >= 5 && parts[0] == "48" && parts[1] == "2" {
             let r = parts[2].parse().ok()?;
             let g = parts[3].parse().ok()?;
             let b = parts[4].parse().ok()?;
-            return Some(Rgba([r, g, b, 255]));
+            return Some(AnsiColor::Background(Rgba([r, g, b, 255])));
         }
 
         // Reset code: 0
         if parts.len() == 1 && parts[0] == "0" {
-            return Some(Rgba([255, 255, 255, 255])); // Reset to white
+            return Some(AnsiColor::Reset);
         }
 
         None
     }
 }
 
-/// Parse a hex color string to Rgba<u8>
-/// Accepts formats: "#RRGGBB", "RRGGBB", "#RGB", "RGB", "0xRRGGBB"
-/// With optional alpha: "#RRGGBBAA", "RRGGBBAA", "#RGBA", "RGBA"
-/// If no alpha is provided, defaults to 255 (fully opaque)
-pub fn parse_hex_color(hex: &str) -> Result<Rgba<u8>, String> {
-    // Lowercase and remove '#' or '0x' if present
-    let hex = hex.to_lowercase();
-    let hex = hex
-        .strip_prefix('#')
-        .or_else(|| hex.strip_prefix("0x"))
-        .unwrap_or(&hex);
-
-    match hex.len() {
-        // Short format: "RGB" -> "RRGGBB"
-        3 => {
-            let r = parse_hex_single(hex, 0)?;
-            let g = parse_hex_single(hex, 1)?;
-            let b = parse_hex_single(hex, 2)?;
-
-            Ok(Rgba([r, g, b, 255]))
-        }
-        // Short format with alpha: "RGBA" -> "RRGGBBAA"
-        4 => {
-            let r = parse_hex_single(hex, 0)?;
-            let g = parse_hex_single(hex, 1)?;
-            let b = parse_hex_single(hex, 2)?;
-            let a = parse_hex_single(hex, 3)?;
-
-            // Double each digit: F -> FF
-            Ok(Rgba([r, g, b, a]))
-        }
-        // Full format: "RRGGBB"
-        6 => {
-            let r = parse_hex_pair(hex, 0)?;
-            let g = parse_hex_pair(hex, 2)?;
-            let b = parse_hex_pair(hex, 4)?;
-
-            Ok(Rgba([r, g, b, 255]))
-        }
-        // Full format with alpha: "RRGGBBAA"
-        8 => {
-            let r = parse_hex_pair(hex, 0)?;
-            let g = parse_hex_pair(hex, 2)?;
-            let b = parse_hex_pair(hex, 4)?;
-            let a = parse_hex_pair(hex, 6)?;
-
-            Ok(Rgba([r, g, b, a]))
-        }
-        _ => Err(format!("Invalid hex color length: {}", hex)),
-    }
-}
-
-fn parse_hex_pair(hex: &str, start: usize) -> Result<u8, String> {
-    u8::from_str_radix(&hex[start..start + 2], 16)
-        .map_err(|_| format!("Invalid hex color: {}", hex))
-}
-
-fn parse_hex_single(hex: &str, start: usize) -> Result<u8, String> {
-    u8::from_str_radix(&hex[start..start + 1], 16)
-        .map(|v| v * 17) // Expand: F -> FF
-        .map_err(|_| format!("Invalid hex color: {}", hex))
+/// Represents the type of ANSI color code
+enum AnsiColor {
+    Foreground(Rgba<u8>),
+    Background(Rgba<u8>),
+    Reset,
 }

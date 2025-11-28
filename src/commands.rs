@@ -1,18 +1,13 @@
 use std::time::Duration;
 
-use image::{Rgba, RgbaImage};
+use image::RgbaImage;
 
-use crate::{
-    Context, Error, Res,
-    image_to_ascii::{AsciiRenderer, parse_hex_color},
-};
+use crate::{Context, Error, Res, image_to_ascii::AsciiRenderer};
 
 use poise::{
     command,
     serenity_prelude::{Attachment, CreateAttachment, Message, User},
 };
-
-const DEFAULT_BACKGROUND: Rgba<u8> = Rgba([20, 20, 20, 255]);
 
 #[command(
     slash_command,
@@ -23,16 +18,13 @@ pub async fn image_to_ascii(
     ctx: Context<'_>,
     #[description = "Image to convert to ASCII"] attachment: Attachment,
     #[description = "Custom charset (Max 20 chars)"] charset: Option<String>,
-    #[description = "A Brightness boost value. 50 = 50% boost, 100 = 100% boost and so on"]
-    brightness_boost: Option<u32>,
-    #[description = "The image's background colour, accepts hex RGBA, default = #141414"]
-    background_color: Option<String>,
-    #[description = "Sets the maximum size of the image (Accepts up to 500)"]
+    #[description = "A Brightness percentage for the background (Default 20%)"]
+    background_brightness: Option<u32>,
+    #[description = "Sets the maximum size of the image (Accepts up to 200)"]
     max_size: Option<u32>,
 ) -> Result<(), Error> {
-    let brightness_boost = brightness_boost.unwrap_or(100);
-    let background_color =
-        parse_hex_color(background_color.as_deref().unwrap_or("#141414"))?;
+    let background_brightness =
+        background_brightness.unwrap_or(20).clamp(0, 100);
     let size = max_size.unwrap_or(150);
     let charset = charset.map(|mut c| {
         c.truncate(20);
@@ -43,8 +35,7 @@ pub async fn image_to_ascii(
         ctx,
         &attachment.download().await?,
         charset.as_deref(),
-        (100 + brightness_boost) as f32 / 100.0,
-        background_color,
+        background_brightness as f32 / 100.0,
         size,
     )
     .await
@@ -59,15 +50,7 @@ pub async fn attachment_to_ascii(ctx: Context<'_>, msg: Message) -> Res<()> {
     let attachment =
         msg.attachments.first().ok_or("No attachment in this message")?;
 
-    _image_to_ascii(
-        ctx,
-        &attachment.download().await?,
-        None,
-        1.0,
-        DEFAULT_BACKGROUND,
-        150,
-    )
-    .await
+    _image_to_ascii(ctx, &attachment.download().await?, None, 0.4, 150).await
 }
 
 #[command(
@@ -78,6 +61,7 @@ pub async fn attachment_to_ascii(ctx: Context<'_>, msg: Message) -> Res<()> {
 pub async fn avatar_to_ascii(ctx: Context<'_>, user: User) -> Res<()> {
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
+        .read_timeout(Duration::from_secs(30))
         .build()?;
     let avatar = client
         .get(user.static_face())
@@ -87,22 +71,21 @@ pub async fn avatar_to_ascii(ctx: Context<'_>, user: User) -> Res<()> {
         .bytes()
         .await?;
 
-    _image_to_ascii(ctx, &avatar, None, 1.0, DEFAULT_BACKGROUND, 150).await
+    _image_to_ascii(ctx, &avatar, None, 0.4, 150).await
 }
 
 async fn _image_to_ascii(
     ctx: Context<'_>,
     image_bytes: &[u8],
     charset: Option<&str>,
-    brightness_boost: f32,
-    background_color: Rgba<u8>,
+    background_brightness: f32,
     size: u32,
 ) -> Res<()> {
     ctx.defer().await?;
 
-    let charset = charset.unwrap_or(".+P0#@");
+    let charset = charset.unwrap_or(".:-+=#@");
     let renderer: AsciiRenderer =
-        AsciiRenderer::new(brightness_boost, background_color, size)?;
+        AsciiRenderer::new(background_brightness, size)?;
     let ascii_art = renderer.process_image(image_bytes, charset)?;
     let output_image: RgbaImage = renderer.render_to_image(&ascii_art)?;
     let mut png_bytes = Vec::new();
